@@ -2,12 +2,16 @@ package com.leon.ms_accounts.service.accountMovement.impl;
 
 import com.leon.ms_accounts.domain.Account;
 import com.leon.ms_accounts.domain.AccountMovement;
+import com.leon.ms_accounts.domain.dto.request.AccountMovementEvent;
 import com.leon.ms_accounts.exception.EntityNotFoundException;
 import com.leon.ms_accounts.exception.InsufficientBalanceException;
+import com.leon.ms_accounts.messaging.AccountPublisher;
 import com.leon.ms_accounts.repository.AccountMovementRepository;
 import com.leon.ms_accounts.repository.AccountRepository;
 import com.leon.ms_accounts.service.accountMovement.AccountMovementService;
 import lombok.AllArgsConstructor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
@@ -20,8 +24,10 @@ import java.util.Optional;
 @Service
 @AllArgsConstructor
 public class AccountMovementServiceImpl implements AccountMovementService {
+    private static final Logger log = LoggerFactory.getLogger(AccountMovementServiceImpl.class);
     private final AccountMovementRepository accountMovementRepository;
     private final AccountRepository accountRepository;
+    private final AccountPublisher accountPublisher;
 
     @Override
     public AccountMovement saveAccountMovement(AccountMovement accountMovement) throws InsufficientBalanceException {
@@ -34,7 +40,21 @@ public class AccountMovementServiceImpl implements AccountMovementService {
         account.setInitialBalance(newBalance);
         accountRepository.save(account);
         accountMovement.setBalance(newBalance);
+        accountMovement.setMovementDate(LocalDateTime.now());
+        buildAccountMovementEventAndSend(accountMovement, account.getClientId());
         return accountMovementRepository.save(accountMovement);
+    }
+
+    private void buildAccountMovementEventAndSend(AccountMovement accountMovement, Long clientId) {
+        AccountMovementEvent accountMovementEvent = new AccountMovementEvent();
+        accountMovementEvent.setAccountId(accountMovement.getAccountId());
+        accountMovementEvent.setClientId(clientId);
+        accountMovementEvent.setNewBalance(accountMovementEvent.getNewBalance());
+        try {
+            accountPublisher.convertAndSend(accountMovementEvent);
+        } catch (Exception e) {
+            log.error("Error while send account movement event, error: {}", e.getMessage());
+        }
     }
 
     @Override
